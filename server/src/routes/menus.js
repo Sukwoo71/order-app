@@ -23,6 +23,7 @@ router.get('/', async (req, res, next) => {
     }
     const client = await p.connect();
     try {
+      await client.query("SET timezone = 'Asia/Seoul'");
       const { rows: menuRows } = await client.query(
         'SELECT id, name, description, price, image_url AS "imageUrl", stock FROM menus ORDER BY name'
       );
@@ -58,9 +59,15 @@ router.patch('/:id/stock', async (req, res, next) => {
       menu.stock = Math.max(0, (menu.stock || 0) + d);
       return res.json({ data: { id: menu.id, stock: menu.stock } });
     }
-    const { rows } = await p.query('UPDATE menus SET stock = GREATEST(0, stock + $2) WHERE id=$1 RETURNING stock', [id, d]);
-    if (!rows.length) return res.status(404).json({ error: { message: 'Menu not found' } });
-    res.json({ data: { id, stock: rows[0].stock } });
+    const client = await p.connect();
+    try {
+      await client.query("SET timezone = 'Asia/Seoul'");
+      const { rows } = await client.query('UPDATE menus SET stock = GREATEST(0, stock + $2), updated_at = NOW() WHERE id=$1 RETURNING stock', [id, d]);
+      if (!rows.length) return res.status(404).json({ error: { message: 'Menu not found' } });
+      res.json({ data: { id, stock: rows[0].stock } });
+    } finally {
+      client.release();
+    }
   } catch (e) {
     next(e);
   }

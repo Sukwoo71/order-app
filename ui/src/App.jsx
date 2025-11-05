@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
 import './App.css'
@@ -7,50 +7,38 @@ function App() {
   const [cart, setCart] = useState([]);
   const [currentPage, setCurrentPage] = useState('order'); // 'order' 또는 'admin'
 
-  // 관리자 페이지를 위한 더미 데이터
-  const [dashboardSummary, setDashboardSummary] = useState({
-    totalOrders: 1,
-    pendingOrders: 1,
-    inProgressOrders: 0,
-    completedOrders: 0,
-  });
+  // 백엔드 연동 상태
+  const [menus, setMenus] = useState([]);
+  const [orders, setOrders] = useState([]);
 
-  const [inventory, setInventory] = useState([
-    { id: 1, name: '아메리카노 (ICE)', stock: 10 },
-    { id: 2, name: '아메리카노 (HOT)', stock: 10 },
-    { id: 3, name: '카페라떼', stock: 10 },
-  ]);
+  const dashboardSummary = useMemo(() => {
+    const total = orders.length;
+    const pending = orders.filter(o => o.status === 'PENDING').length;
+    const inProgress = orders.filter(o => o.status === 'IN_PROGRESS').length;
+    const completed = orders.filter(o => o.status === 'COMPLETED').length;
+    return { totalOrders: total, pendingOrders: pending, inProgressOrders: inProgress, completedOrders: completed };
+  }, [orders]);
 
-  const [orders, setOrders] = useState([
-    { id: 1, time: '7월 31일 13:00', menu: '아메리카노(ICE) x 1', amount: 4000, status: '주문 접수' },
-  ]);
+  const API = (path) => {
+    const base = (import.meta?.env?.VITE_API_BASE) || 'http://localhost:4000/api';
+    return `${base}${path}`;
+  };
 
-  const menuItems = [
-    {
-      id: 1,
-      name: '아메리카노(ICE)',
-      price: 4000,
-      description: '시원한 아이스 아메리카노',
-      options: [{ name: '샷 추가', price: 500 }, { name: '시럽 추가', price: 0 }],
-      image: '/americano-ice.jpg' // 이미지 경로 업데이트
-    },
-    {
-      id: 2,
-      name: '아메리카노(HOT)',
-      price: 4000,
-      description: '따뜻한 아메리카노',
-      options: [{ name: '샷 추가', price: 500 }, { name: '시럽 추가', price: 0 }],
-      image: '/americano-hot.jpg' // 이미지 경로 업데이트
-    },
-    {
-      id: 3,
-      name: '카페라떼',
-      price: 5000,
-      description: '부드러운 카페라떼',
-      options: [{ name: '샷 추가', price: 500 }, { name: '시럽 추가', price: 0 }],
-      image: '/caffe-latte.jpg' // 이미지 경로 업데이트
-    }
-  ];
+  async function fetchMenus() {
+    const res = await fetch(API('/menus?includeOptions=true'));
+    const json = await res.json();
+    setMenus(json.data || []);
+  }
+  async function fetchOrders() {
+    const res = await fetch(API('/orders'));
+    const json = await res.json();
+    setOrders(json.data || []);
+  }
+
+  useEffect(() => {
+    fetchMenus();
+    fetchOrders();
+  }, []);
 
   const addToCart = (item, selectedOptions) => {
     let itemPrice = item.price;
@@ -88,39 +76,23 @@ function App() {
     setCart(newCart);
   };
 
-  const placeOrder = () => {
+  const placeOrder = async () => {
     if (cart.length === 0) {
       alert('장바구니가 비어있습니다. 메뉴를 선택해주세요.');
       return;
     }
-
-    const newOrder = {
-      id: orders.length + 1,
-      time: new Date().toLocaleString(),
-      menu: cart.map(item => `${item.name}${item.optionsText.length > 0 ? `(${item.optionsText.join(', ')})` : ''} x ${item.quantity}`).join(', '),
-      amount: calculateTotal(),
-      status: '주문 접수',
+    const payload = {
+      items: cart.map(it => ({ menuId: it.id, quantity: it.quantity, options: [] }))
     };
-
-    setOrders(prevOrders => [...prevOrders, newOrder]);
-    setDashboardSummary(prevSummary => ({
-      ...prevSummary,
-      totalOrders: prevSummary.totalOrders + 1,
-      pendingOrders: prevSummary.pendingOrders + 1,
-    }));
-
-    // 재고 감소 로직 추가
-    setInventory(prevInventory =>
-      prevInventory.map(invItem => {
-        const cartItem = cart.find(item => item.id === invItem.id);
-        if (cartItem) {
-          return { ...invItem, stock: Math.max(0, invItem.stock - cartItem.quantity) };
-        }
-        return invItem;
-      })
-    );
-
-    setCart([]); // 장바구니 비우기
+    const res = await fetch(API('/orders'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const json = await res.json();
+    if (!res.ok) {
+      alert(json?.error?.message || '주문에 실패했습니다');
+      return;
+    }
+    setCart([]);
+    await fetchMenus();
+    await fetchOrders();
     alert('주문이 완료되었습니다!');
   };
 
@@ -134,55 +106,32 @@ function App() {
     return '정상';
   };
 
-  const handleStockChange = (id, delta) => {
-    setInventory((prevInventory) =>
-      prevInventory.map((item) =>
-        item.id === id ? { ...item, stock: Math.max(0, item.stock + delta) } : item
-      )
-    );
+  const handleStockChange = async (id, delta) => {
+    await fetch(API(`/menus/${id}/stock`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delta }) });
+    fetchMenus();
   };
 
-  const handleOrderStatusChange = (id, manualComplete = false) => {
-    setOrders((prevOrders) =>
-      prevOrders.map((order) => {
-        if (order.id === id && order.status === '주문 접수') {
-          // '제조 시작' 버튼 클릭 시
-          const orderQuantity = parseInt(order.menu.match(/x (\d+)/)?.[1] || 1);
-          const completionTime = orderQuantity * 10 * 1000; // 1잔당 10초
-
-          setTimeout(() => {
-            setOrders(prevOrders => prevOrders.map(o => {
-              // 이미 수동으로 완료된 경우 다시 변경하지 않도록 체크
-              if (o.id === id && o.status === '제조 중') {
-                setDashboardSummary(prevSummary => ({
-                  ...prevSummary,
-                  inProgressOrders: prevSummary.inProgressOrders - 1,
-                  completedOrders: prevSummary.completedOrders + 1,
-                }));
-                return { ...o, status: '제조 완료' };
-              }
-              return o;
-            }));
-          }, completionTime);
-
-          setDashboardSummary(prevSummary => ({
-            ...prevSummary,
-            pendingOrders: prevSummary.pendingOrders - 1,
-            inProgressOrders: prevSummary.inProgressOrders + 1,
-          }));
-          return { ...order, status: '제조 중' };
-        } else if (order.id === id && order.status === '제조 중' && manualComplete) {
-          // '완료' 버튼 클릭 시 (수동 완료)
-          setDashboardSummary(prevSummary => ({
-            ...prevSummary,
-            inProgressOrders: prevSummary.inProgressOrders - 1,
-            completedOrders: prevSummary.completedOrders + 1,
-          }));
-          return { ...order, status: '제조 완료' };
+  const handleOrderStatusChange = async (id, manualComplete = false) => {
+    const order = orders.find(o => o.id === id);
+    if (!order) return;
+    const sumQty = (order.items || []).reduce((s, it) => s + (it.quantity || 0), 0) || 1;
+    if (order.status === 'PENDING') {
+      await fetch(API(`/orders/${id}/status`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'IN_PROGRESS' }) });
+      fetchOrders();
+      setTimeout(async () => {
+        const latestRes = await fetch(API(`/orders/${id}`));
+        const latest = (await latestRes.json()).data;
+        if (latest?.status === 'IN_PROGRESS') {
+          await fetch(API(`/orders/${id}/status`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'COMPLETED' }) });
+          fetchOrders();
         }
-        return order;
-      })
-    );
+      }, sumQty * 10000);
+      return;
+    }
+    if (order.status === 'IN_PROGRESS' && manualComplete) {
+      await fetch(API(`/orders/${id}/status`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'COMPLETED' }) });
+      fetchOrders();
+    }
   };
 
   return (
@@ -208,16 +157,16 @@ function App() {
       {currentPage === 'order' ? (
         <main className="main-content">
           <section className="menu-list">
-            {menuItems.map((item) => (
+            {menus.map((item) => (
               <div key={item.id} className="menu-item-card">
-                <img src={item.image} alt={item.name} className="item-image" /> {/* 이미지 태그 추가 */}
+                <img src={item.imageUrl || item.image} alt={item.name} className="item-image" /> {/* 이미지 태그 추가 */}
                 <h3>{item.name}</h3>
                 <p>{item.price.toLocaleString()}원</p>
                 <p className="item-description">{item.description}</p>
                 <div className="options">
-                  {item.options.map((option, index) => (
+                  {(item.options || []).map((option, index) => (
                     <label key={index}>
-                      <input type="checkbox" name={option.name} /> {option.name} ({option.price >= 0 ? '+' : ''}{option.price.toLocaleString()}원)
+                      <input type="checkbox" name={option.name} /> {option.name} ({(option.priceDelta || 0) >= 0 ? '+' : ''}{Number(option.priceDelta || 0).toLocaleString()}원)
                     </label>
                   ))}
                 </div>
@@ -280,7 +229,7 @@ function App() {
           <section className="admin-inventory">
             <h2>재고 현황</h2>
             <div className="inventory-items">
-              {inventory.map((item) => (
+              {menus.map((item) => (
                 <div key={item.id} className="inventory-item-card">
                   <h3>{item.name}</h3>
                   <p>
@@ -306,14 +255,14 @@ function App() {
               ) : (
                 orders.map((order) => (
                   <div key={order.id} className="order-item">
-                    <span>{order.time}</span>
-                    <span>{order.menu}</span>
-                    <span>{order.amount.toLocaleString()}원</span>
-                    {order.status === '주문 접수' ? (
+                    <span>{new Date(order.orderedAt || order.time).toLocaleString()}</span>
+                    <span>{(order.items || []).map(i => `${i.menuName || i.menuId} x ${i.quantity}`).join(', ')}</span>
+                    <span>{(order.totalAmount || order.amount || 0).toLocaleString()}원</span>
+                    {order.status === 'PENDING' ? (
                       <button className="order-action-button" onClick={() => handleOrderStatusChange(order.id)}>
                         제조 시작
                       </button>
-                    ) : order.status === '제조 중' ? (
+                    ) : order.status === 'IN_PROGRESS' ? (
                       <div className="in-progress-display">
                         <span className="progress-bar">제조 중</span>
                         <button className="order-action-button complete small" onClick={() => handleOrderStatusChange(order.id, true)}>
@@ -322,7 +271,7 @@ function App() {
                       </div>
                     ) : (
                       <span className={`order-status completed-button`}>
-                        {order.status}
+                        제조 완료
                       </span>
                     )}
                   </div>

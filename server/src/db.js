@@ -29,6 +29,8 @@ export async function initDb() {
   let client;
   try {
     client = await p.connect();
+    // 한국 시간대 설정
+    await client.query("SET timezone = 'Asia/Seoul'");
     await client.query('BEGIN');
     await client.query(`CREATE TABLE IF NOT EXISTS menus (
       id TEXT PRIMARY KEY,
@@ -105,6 +107,20 @@ export async function seedFromMemory(menusMem) {
 
 export function db() {
   return getPool();
+}
+
+// 한국 시간대로 클라이언트 설정 헬퍼
+export async function getClientWithTimezone() {
+  const p = getPool();
+  if (!p) return null;
+  const client = await p.connect();
+  try {
+    await client.query("SET timezone = 'Asia/Seoul'");
+  } catch (e) {
+    client.release();
+    throw e;
+  }
+  return client;
 }
 
 
