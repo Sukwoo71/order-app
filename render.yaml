@@ -1,0 +1,37 @@
+services:
+  # 백엔드 서버 (Express)
+  - type: web
+    name: coffee-order-server
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DB_URL
+        sync: false  # 수동으로 설정 필요
+      - key: DB_USERNAME
+        sync: false  # 수동으로 설정 필요
+      - key: DB_PASSWORD
+        sync: false  # 수동으로 설정 필요
+
+  # 프론트엔드 (Static Site)
+  - type: web
+    name: coffee-order-ui
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_BASE
+        sync: false  # 백엔드 서버 URL로 수동 설정 필요
+
+databases:
+  # PostgreSQL 데이터베이스
+  - name: coffee-order-db
+    databaseName: wsdn
+    user: wsdn
+    plan: free
+
