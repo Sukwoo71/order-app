@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: coffee-order-postgres
+    environment:
+      POSTGRES_USER: wsdn
+      POSTGRES_PASSWORD: 1234
+      POSTGRES_DB: wsdn
+      TZ: Asia/Seoul
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wsdn"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coffee-order-network
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: coffee-order-server
+    environment:
+      PORT: 4000
+      DB_URL: jdbc:postgresql://postgres:5432/wsdn
+      DB_USERNAME: wsdn
+      DB_PASSWORD: 1234
+      NODE_ENV: production
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - coffee-order-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  coffee-order-network:
+    driver: bridge
+

@@ -40,21 +40,34 @@ function App() {
     fetchOrders();
   }, []);
 
-  const addToCart = (item, selectedOptions) => {
+  // 관리자 화면에서 주문 목록 자동 새로고침 (5초마다)
+  useEffect(() => {
+    if (currentPage === 'admin') {
+      const interval = setInterval(() => {
+        fetchOrders();
+        fetchMenus();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage]);
+
+  const addToCart = (item, selectedOptionIds) => {
     let itemPrice = item.price;
     const optionsText = [];
+    const selectedOptions = [];
 
-    if (selectedOptions.shot) {
-      itemPrice += 500;
-      optionsText.push('샷 추가');
-    }
-    if (selectedOptions.syrup) {
-      optionsText.push('시럽 추가');
-    }
+    (item.options || []).forEach(opt => {
+      if (selectedOptionIds.includes(opt.id)) {
+        itemPrice += (opt.priceDelta || 0);
+        optionsText.push(opt.name);
+        selectedOptions.push({ optionId: opt.id });
+      }
+    });
 
     const existingItemIndex = cart.findIndex(
       (cartItem) => cartItem.id === item.id && 
-                    JSON.stringify(cartItem.selectedOptions) === JSON.stringify(selectedOptions)
+                    JSON.stringify(cartItem.selectedOptions.map(o => o.optionId).sort()) === JSON.stringify(selectedOptionIds.sort())
     );
 
     if (existingItemIndex > -1) {
@@ -82,7 +95,7 @@ function App() {
       return;
     }
     const payload = {
-      items: cart.map(it => ({ menuId: it.id, quantity: it.quantity, options: [] }))
+      items: cart.map(it => ({ menuId: it.id, quantity: it.quantity, options: it.selectedOptions || [] }))
     };
     const res = await fetch(API('/orders'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const json = await res.json();
@@ -165,17 +178,19 @@ function App() {
                 <p className="item-description">{item.description}</p>
                 <div className="options">
                   {(item.options || []).map((option, index) => (
-                    <label key={index}>
-                      <input type="checkbox" name={option.name} /> {option.name} ({(option.priceDelta || 0) >= 0 ? '+' : ''}{Number(option.priceDelta || 0).toLocaleString()}원)
+                    <label key={option.id || index}>
+                      <input type="checkbox" id={`${item.id}-${option.id}`} /> {option.name} ({(option.priceDelta || 0) >= 0 ? '+' : ''}{Number(option.priceDelta || 0).toLocaleString()}원)
                     </label>
                   ))}
                 </div>
                 <button className="add-to-cart-button" onClick={() => {
-                  const selectedOptions = {
-                    shot: document.querySelector(`[name="샷 추가"]`).checked,
-                    syrup: document.querySelector(`[name="시럽 추가"]`).checked,
-                  };
-                  addToCart(item, selectedOptions);
+                  const selectedOptionIds = (item.options || [])
+                    .filter(opt => {
+                      const checkbox = document.getElementById(`${item.id}-${opt.id}`);
+                      return checkbox?.checked;
+                    })
+                    .map(opt => opt.id);
+                  addToCart(item, selectedOptionIds);
                 }}>
                   담기
                 </button>
